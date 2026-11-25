@@ -67,6 +67,9 @@ pub fn build_router(cfg: &ServeArgs) -> Result<Router> {
         .route("/admin", get(handle_admin_ui))
         .route("/admin/stats", get(handle_admin_stats))
         .route("/webhooks/billing", post(handle_billing_webhook))
+        .route("/webhooks/yookassa", post(handle_yookassa_webhook))
+        .route("/webhooks/stripe", post(handle_stripe_webhook))
+        .route("/webhooks/cryptobot", post(handle_cryptobot_webhook))
         .route("/v1/chat/completions", post(handle_llm_post))
         .route("/v1/completions", post(handle_llm_post))
         .route("/v1/messages", post(handle_llm_post))
@@ -171,24 +174,31 @@ fn default_days() -> u64 {
     365
 }
 
-async fn handle_billing_webhook(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    axum::Json(payload): axum::Json<BillingWebhookPayload>,
-) -> Response {
-    let provided = headers
+fn is_valid_webhook_secret(headers: &HeaderMap, expected: &str) -> bool {
+    headers
         .get("x-aegis-webhook-secret")
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if provided != state.webhook_secret {
-        return (
-            StatusCode::UNAUTHORIZED,
-            [(header::CONTENT_TYPE, "application/json")],
-            json!({"error": "invalid webhook secret"}).to_string(),
-        )
-            .into_response();
-    }
-    let key = issue_license(&payload.tier, payload.days, &state.license_secret);
+        .unwrap_or("")
+        == expected
+}
+
+fn unauthorized_webhook() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::CONTENT_TYPE, "application/json")],
+        json!({"error": "invalid webhook secret"}).to_string(),
+    )
+        .into_response()
+}
+
+fn issue_license_response(
+    state: &AppState,
+    tier: &str,
+    days: u64,
+    customer_email: Option<String>,
+    provider: &str,
+) -> Response {
+    let key = issue_license(tier, days, &state.license_secret);
     state
         .metrics
         .licenses_issued_total
@@ -198,14 +208,128 @@ async fn handle_billing_webhook(
         [(header::CONTENT_TYPE, "application/json")],
         json!({
             "status": "issued",
-            "tier": payload.tier,
-            "days": payload.days,
-            "customer_email": payload.customer_email,
+            "provider": provider,
+            "tier": tier,
+            "days": days,
+            "customer_email": customer_email,
             "license_key": key,
         })
         .to_string(),
     )
         .into_response()
+}
+
+fn bad_webhook(msg: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        [(header::CONTENT_TYPE, "application/json")],
+        json!({"error": msg}).to_string(),
+    )
+        .into_response()
+}
+
+async fn handle_billing_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(payload): axum::Json<BillingWebhookPayload>,
+) -> Response {
+    if !is_valid_webhook_secret(&headers, &state.webhook_secret) {
+        return unauthorized_webhook();
+    }
+    issue_license_response(
+        &state,
+        &payload.tier,
+        payload.days,
+        payload.customer_email,
+        "generic",
+    )
+}
+
+/// YooKassa (ЮKassa) `payment.succeeded` webhook adapter for RU/CIS billing.
+async fn handle_yookassa_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response {
+    if !is_valid_webhook_secret(&headers, &state.webhook_secret) {
+        return unauthorized_webhook();
+    }
+    let event = body.get("event").and_then(|v| v.as_str()).unwrap_or("");
+    let obj = body.get("object").unwrap_or(&Value::Null);
+    let status = obj.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if event != "payment.succeeded" || status != "succeeded" {
+        return bad_webhook("expected payment.succeeded with object.status=succeeded");
+    }
+    let meta = obj.get("metadata").unwrap_or(&Value::Null);
+    let tier = meta.get("tier").and_then(|v| v.as_str()).unwrap_or("pro");
+    let days = meta.get("days").and_then(|v| v.as_u64()).unwrap_or(30);
+    let email = meta
+        .get("email")
+        .or_else(|| obj.pointer("/receipt/customer/email"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    issue_license_response(&state, tier, days, email, "yookassa")
+}
+
+/// Stripe `checkout.session.completed` webhook adapter for global billing.
+async fn handle_stripe_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response {
+    if !is_valid_webhook_secret(&headers, &state.webhook_secret) {
+        return unauthorized_webhook();
+    }
+    let event_type = body.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    if event_type != "checkout.session.completed" {
+        return bad_webhook("expected type=checkout.session.completed");
+    }
+    let obj = body.pointer("/data/object").unwrap_or(&Value::Null);
+    let meta = obj.get("metadata").unwrap_or(&Value::Null);
+    let tier = meta.get("tier").and_then(|v| v.as_str()).unwrap_or("pro");
+    let days = meta.get("days").and_then(|v| v.as_u64()).unwrap_or(30);
+    let email = obj
+        .pointer("/customer_details/email")
+        .or_else(|| obj.get("customer_email"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    issue_license_response(&state, tier, days, email, "stripe")
+}
+
+/// CryptoBot / TON / USDT `invoice_paid` webhook adapter.
+async fn handle_cryptobot_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response {
+    if !is_valid_webhook_secret(&headers, &state.webhook_secret) {
+        return unauthorized_webhook();
+    }
+    let update_type = body
+        .get("update_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let payload_obj = body.get("payload").unwrap_or(&Value::Null);
+    let status = payload_obj
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if update_type != "invoice_paid" || status != "paid" {
+        return bad_webhook("expected update_type=invoice_paid with payload.status=paid");
+    }
+    // Format: "tier:days:email" (e.g. "pro:30:user@example.com")
+    let raw_meta = payload_obj
+        .get("payload")
+        .and_then(|v| v.as_str())
+        .unwrap_or("pro:30");
+    let mut parts = raw_meta.splitn(3, ':');
+    let tier = parts.next().filter(|s| !s.is_empty()).unwrap_or("pro");
+    let days = parts
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(30);
+    let email = parts.next().filter(|s| !s.is_empty()).map(str::to_string);
+    issue_license_response(&state, tier, days, email, "cryptobot")
 }
 
 async fn handle_admin_stats(State(state): State<AppState>) -> Response {

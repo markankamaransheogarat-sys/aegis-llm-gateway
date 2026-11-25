@@ -1,76 +1,504 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Aegis AI Gateway — Cut LLM Spend 60% & Block Prompt Injections</title>
-  <style>
-    :root { --bg: #0b0f19; --card: #121826; --border: #222b40; --text: #e6edf7; --muted: #94a3b8; --accent: #38bdf8; --green: #22c55e; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: Inter, system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 48px 20px; }
-    .badge { display: inline-block; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-size: 13px; font-weight: 600; }
-    h1 { font-size: clamp(32px, 5vw, 52px); line-height: 1.1; margin: 16px 0; }
-    p.lead { font-size: 19px; color: var(--muted); max-width: 720px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin: 36px 0; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
-    .price { font-size: 34px; font-weight: 800; color: var(--green); margin: 8px 0; }
-    code, pre { background: #070a12; border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: block; overflow-x: auto; color: #cbd5e1; font-size: 14px; }
-    label { display: block; margin-top: 12px; color: var(--muted); font-size: 14px; }
-    input[type="range"] { width: 100%; accent-color: var(--accent); }
-    .savings { font-size: 28px; font-weight: 800; color: var(--green); margin-top: 16px; }
-    .btn { display: inline-block; margin-top: 14px; padding: 10px 18px; background: var(--accent); color: #05101c; font-weight: 700; text-decoration: none; border-radius: 8px; }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <span class="badge">Rust · #![forbid(unsafe_code)] · Drop-in OpenAI / Anthropic Proxy</span>
-    <h1>Cut LLM API Spend by 60% and Stop Secret Leaks at the Edge.</h1>
-    <p class="lead">Aegis AI Gateway sits in front of OpenAI, Anthropic, or Ollama in a single 12 MB Rust binary: sub-millisecond L1/L2 semantic caching, outbound secret redaction, prompt-injection WAF, and per-key daily USD caps.</p>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>
+      Aegis AI Gateway — LLM Firewall, Semantic Cache &amp; Billing Control
+      Plane
+    </title>
+    <style>
+      :root {
+        --bg: #070b14;
+        --card: #101726;
+        --card-hi: #141f35;
+        --border: #222e47;
+        --text: #eef3fb;
+        --muted: #94a3b8;
+        --accent: #38bdf8;
+        --green: #22c55e;
+        --amber: #f59e0b;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          Inter,
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: radial-gradient(
+          circle at top right,
+          #0f1f3d 0%,
+          var(--bg) 52%
+        );
+        color: var(--text);
+        line-height: 1.6;
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 36px 20px 64px;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 28px;
+      }
+      .brand {
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        font-size: 16px;
+        color: var(--text);
+      }
+      .lang-switch {
+        display: inline-flex;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 4px;
+        gap: 4px;
+      }
+      .lang-btn {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-weight: 700;
+        font-size: 13px;
+        padding: 6px 12px;
+        border-radius: 7px;
+        cursor: pointer;
+      }
+      .lang-btn.active {
+        background: var(--accent);
+        color: #05101c;
+      }
+      .badge {
+        display: inline-block;
+        padding: 5px 12px;
+        border: 1px solid var(--accent);
+        border-radius: 999px;
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      h1 {
+        font-size: clamp(32px, 5vw, 52px);
+        line-height: 1.1;
+        margin: 16px 0;
+      }
+      p.lead {
+        font-size: 18px;
+        color: var(--muted);
+        max-width: 760px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 20px;
+        margin: 28px 0;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 24px;
+      }
+      .card.highlight {
+        border-color: var(--accent);
+        background: var(--card-hi);
+      }
+      .price {
+        font-size: 32px;
+        font-weight: 800;
+        color: var(--green);
+        margin: 8px 0;
+      }
+      .subprice {
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      code,
+      pre {
+        background: #050811;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px;
+        display: block;
+        overflow-x: auto;
+        color: #cbd5e1;
+        font-size: 13px;
+      }
+      label {
+        display: block;
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+      .savings {
+        font-size: 26px;
+        font-weight: 800;
+        color: var(--green);
+        margin-top: 16px;
+      }
+      .btn {
+        display: inline-block;
+        margin-top: 14px;
+        padding: 10px 18px;
+        background: var(--accent);
+        color: #05101c;
+        font-weight: 700;
+        text-decoration: none;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      .btn.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+        margin-left: 8px;
+      }
+      ul {
+        padding-left: 18px;
+        color: var(--muted);
+        margin: 10px 0 0;
+      }
+      li {
+        margin-bottom: 6px;
+      }
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .pill {
+        font-size: 12px;
+        padding: 4px 10px;
+        border-radius: 8px;
+        background: #0b1324;
+        border: 1px solid var(--border);
+        color: #cbd5e1;
+      }
+      footer {
+        margin-top: 40px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <div class="brand">AEGIS AI GATEWAY · v0.2.0</div>
+        <div class="lang-switch">
+          <button id="btnEn" class="lang-btn active" type="button">
+            Global (EN / USD)
+          </button>
+          <button id="btnRu" class="lang-btn" type="button">
+            РФ &amp; СНГ (RU / RUB)
+          </button>
+        </div>
+      </div>
 
-    <pre>docker compose up -d
-# Point any OpenAI SDK to http://localhost:8080/v1</pre>
+      <span id="heroBadge" class="badge"
+        >Rust · #![forbid(unsafe_code)] · Drop-in OpenAI / Anthropic / vLLM
+        Proxy</span
+      >
+      <h1 id="heroTitle">
+        Cut LLM API Spend by 60% and Stop Secret Leaks at the Edge.
+      </h1>
+      <p id="heroLead" class="lead">
+        Aegis AI Gateway sits in front of OpenAI, Anthropic, GigaChat,
+        YandexGPT, or local Ollama/vLLM in a single 12 MB Rust binary:
+        sub-millisecond L1/L2 semantic caching, outbound secret redaction,
+        prompt-injection WAF, per-key RPM rate limits, and automated billing
+        webhooks.
+      </p>
 
-    <div class="card" style="margin-top:28px;">
-      <h2>Interactive LLM ROI Savings Calculator</h2>
-      <label>Monthly LLM API Spend: <strong id="spendVal">$3,000</strong></label>
-      <input id="spend" type="range" min="200" max="50000" step="100" value="3000" />
-      <label>Expected Repeat / Semantic Hit Rate: <strong id="hitVal">55%</strong></label>
-      <input id="hit" type="range" min="15" max="85" step="5" value="55" />
-      <div class="savings">Estimated Annual Savings: <span id="annualVal">$19,800</span> / year</div>
+      <pre>
+docker compose up -d
+# Point any OpenAI SDK to http://localhost:8080/v1  |  Live UI: http://localhost:8080/admin</pre>
+
+      <div class="grid">
+        <div class="card">
+          <h3 id="f1Title">DLP &amp; Prompt-Injection WAF</h3>
+          <p id="f1Desc" style="color: var(--muted)">
+            Scrubs OpenAI/AWS/GitHub keys, JWTs, and PII before prompts leave
+            your VPC. Blocks jailbreak/system-prompt extraction at the edge.
+          </p>
+        </div>
+        <div class="card">
+          <h3 id="f2Title">L1/L2 Semantic Cache + RPM</h3>
+          <p id="f2Desc" style="color: var(--muted)">
+            Sub-millisecond exact SHA-256 + SimHash semantic hit cache, per-key
+            RPM rate limiter (HTTP 429), and daily USD budget caps.
+          </p>
+        </div>
+        <div class="card">
+          <h3 id="f3Title">Auto-Provisioning &amp; Live Admin</h3>
+          <p id="f3Desc" style="color: var(--muted)">
+            Built-in Stripe, YooKassa (ЮKassa), and CryptoBot (TON/USDT)
+            webhooks issue signed offline license keys. Live stats at
+            <code>/admin</code> and <code>/metrics</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 24px">
+        <h2 id="calcTitle">Interactive LLM ROI Savings Calculator</h2>
+        <label
+          ><span id="calcSpendLbl">Monthly LLM API Spend</span>:
+          <strong id="spendVal">$3,000</strong></label
+        >
+        <input
+          id="spend"
+          type="range"
+          min="200"
+          max="50000"
+          step="100"
+          value="3000"
+        />
+        <label
+          ><span id="calcHitLbl">Expected Repeat / Semantic Hit Rate</span>:
+          <strong id="hitVal">55%</strong></label
+        >
+        <input id="hit" type="range" min="15" max="85" step="5" value="55" />
+        <div class="savings">
+          <span id="calcOutLbl">Estimated Annual Savings</span>:
+          <span id="annualVal">$19,800</span> <span id="calcPerYr">/ year</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3 id="p1Title">Community (OSS)</h3>
+          <div id="p1Price" class="price">$0</div>
+          <div id="p1Sub" class="subprice">Apache-2.0 / MIT · Self-hosted</div>
+          <ul id="p1List">
+            <li>12 MB static Rust binary &amp; Docker image</li>
+            <li>L1/L2 SimHash cache &amp; DLP secret scrubbing</li>
+            <li>Prompt-injection WAF &amp; Prometheus <code>/metrics</code></li>
+          </ul>
+          <a
+            class="btn"
+            href="https://github.com/markankamaransheogarat-sys/aegis-llm-gateway/releases/latest"
+            >Download v0.2.0</a
+          >
+        </div>
+
+        <div class="card highlight">
+          <h3 id="p2Title">Pro / Team License</h3>
+          <div id="p2Price" class="price">$49 / mo</div>
+          <div id="p2Sub" class="subprice">
+            Stripe · Card · CryptoBot (USDT/TON)
+          </div>
+          <ul id="p2List">
+            <li>Offline signed <code>AEGIS-PRO-...</code> license key</li>
+            <li>Per-key RPM rate limits &amp; daily USD caps</li>
+            <li>
+              Auto-issued via <code>/webhooks/stripe</code>,
+              <code>/webhooks/yookassa</code>, <code>/webhooks/cryptobot</code>
+            </li>
+          </ul>
+          <a
+            id="p2Cta"
+            class="btn"
+            href="https://github.com/markankamaransheogarat-sys/aegis-llm-gateway/issues/new?title=Pro+License+Request&body=Tier:+pro%0AEmail:+"
+            >Get Pro License</a
+          >
+          <a class="btn secondary" href="https://t.me/amadeuus_bot"
+            >Telegram Bot</a
+          >
+        </div>
+
+        <div class="card">
+          <h3 id="p3Title">Enterprise / On-Prem</h3>
+          <div id="p3Price" class="price">$299 / mo</div>
+          <div id="p3Sub" class="subprice">
+            Invoice / SLA / Custom Compliance
+          </div>
+          <ul id="p3List">
+            <li>
+              Offline <code>AEGIS-ENTERPRISE-...</code> key + private deployment
+            </li>
+            <li>Custom PII/SOC2/152-FZ redaction patterns</li>
+            <li>Dedicated setup for vLLM, Ollama, GigaChat, YandexGPT</li>
+          </ul>
+          <a
+            id="p3Cta"
+            class="btn"
+            href="https://github.com/markankamaransheogarat-sys/aegis-llm-gateway/issues/new?title=Enterprise+Deployment+Inquiry&body=Company:+%0ATarget+Models:+"
+            >Request Enterprise</a
+          >
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 id="payTitle">
+          Self-Hosted Billing Webhook Endpoints (Ready for Production)
+        </h3>
+        <div class="pill-row">
+          <span class="pill">POST /webhooks/stripe (Global)</span>
+          <span class="pill">POST /webhooks/yookassa (РФ / СБП / Карты)</span>
+          <span class="pill">POST /webhooks/cryptobot (USDT / TON)</span>
+          <span class="pill">POST /webhooks/billing (Generic)</span>
+        </div>
+        <pre style="margin-top: 14px">
+# Example: Issue Pro key automatically on YooKassa payment.succeeded
+curl -X POST http://localhost:8080/webhooks/yookassa \
+  -H "X-Aegis-Webhook-Secret: $AEGIS_WEBHOOK_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"payment.succeeded","object":{"status":"succeeded","metadata":{"tier":"pro","days":30,"email":"cto@company.ru"}}}'</pre>
+      </div>
+
+      <footer id="footText">
+        Built in Rust by
+        <a
+          href="https://github.com/markankamaransheogarat-sys"
+          style="color: var(--accent)"
+          >@markankamaransheogarat-sys</a
+        >
+        ·
+        <a
+          href="https://github.com/markankamaransheogarat-sys/aegis-llm-gateway"
+          style="color: var(--accent)"
+          >GitHub Repository</a
+        >
+      </footer>
     </div>
 
-    <div class="grid">
-      <div class="card">
-        <h3>Community (OSS)</h3>
-        <div class="price">$0</div>
-        <p>Self-hosted Apache/MIT binary, L1/L2 SimHash cache, secret redaction, prompt-injection WAF, Prometheus <code>/metrics</code>.</p>
-        <a class="btn" href="https://github.com/markankamaransheogarat-sys/aegis-llm-gateway">Get Started</a>
-      </div>
-      <div class="card" style="border-color: var(--accent);">
-        <h3>Pro / Team License</h3>
-        <div class="price">$49 / mo</div>
-        <p>Offline signed license key, multi-tenant virtual keys, per-team USD budget enforcement, priority support &amp; custom WAF rules.</p>
-        <a class="btn" href="https://github.com/markankamaransheogarat-sys/aegis-llm-gateway#licensing">Request Pro Key</a>
-      </div>
-      <div class="card">
-        <h3>Enterprise</h3>
-        <div class="price">$299 / mo</div>
-        <p>Dedicated SLA, custom SOC2/PII scrubbers, Redis/S3 L3 distributed cache integration, private deployment assistance.</p>
-        <a class="btn" href="https://github.com/markankamaransheogarat-sys/aegis-llm-gateway#licensing">Contact Sales</a>
-      </div>
-    </div>
-  </div>
-  <script>
-    const s = document.getElementById('spend'), h = document.getElementById('hit');
-    const sv = document.getElementById('spendVal'), hv = document.getElementById('hitVal'), av = document.getElementById('annualVal');
-    function calc() {
-      const m = Number(s.value), r = Number(h.value) / 100;
-      sv.textContent = '$' + m.toLocaleString();
-      hv.textContent = Math.round(r * 100) + '%';
-      av.textContent = '$' + Math.round(m * r * 12).toLocaleString();
-    }
-    s.addEventListener('input', calc); h.addEventListener('input', calc); calc();
-  </script>
-</body>
+    <script>
+      const i18n = {
+        en: {
+          heroBadge:
+            "Rust · #![forbid(unsafe_code)] · Drop-in OpenAI / Anthropic / vLLM Proxy",
+          heroTitle:
+            "Cut LLM API Spend by 60% and Stop Secret Leaks at the Edge.",
+          heroLead:
+            "Aegis AI Gateway sits in front of OpenAI, Anthropic, GigaChat, YandexGPT, or local Ollama/vLLM in a single 12 MB Rust binary: sub-millisecond L1/L2 semantic caching, outbound secret redaction, prompt-injection WAF, per-key RPM rate limits, and automated billing webhooks.",
+          f1Title: "DLP & Prompt-Injection WAF",
+          f1Desc:
+            "Scrubs OpenAI/AWS/GitHub keys, JWTs, and PII before prompts leave your VPC. Blocks jailbreak and system-prompt extraction at the edge.",
+          f2Title: "L1/L2 Semantic Cache + RPM",
+          f2Desc:
+            "Sub-millisecond exact SHA-256 + SimHash semantic hit cache, per-key RPM rate limiter (HTTP 429), and daily USD budget caps.",
+          f3Title: "Auto-Provisioning & Live Admin",
+          f3Desc:
+            "Built-in Stripe, YooKassa, and CryptoBot (TON/USDT) webhooks issue signed offline license keys. Live stats at /admin and /metrics.",
+          calcTitle: "Interactive LLM ROI Savings Calculator",
+          calcSpendLbl: "Monthly LLM API Spend",
+          calcHitLbl: "Expected Repeat / Semantic Hit Rate",
+          calcOutLbl: "Estimated Annual Savings",
+          calcPerYr: "/ year",
+          p1Price: "$0",
+          p1Sub: "Apache-2.0 / MIT · Self-hosted",
+          p2Price: "$49 / mo",
+          p2Sub: "Stripe · Card · CryptoBot (USDT/TON)",
+          p3Price: "$299 / mo",
+          p3Sub: "Invoice / SLA / Custom Compliance",
+          p2Cta: "Get Pro License",
+          p3Cta: "Request Enterprise",
+          payTitle:
+            "Self-Hosted Billing Webhook Endpoints (Ready for Production)",
+          currency: "usd",
+        },
+        ru: {
+          heroBadge:
+            "Rust · #![forbid(unsafe_code)] · Прокси для OpenAI / Anthropic / GigaChat / vLLM",
+          heroTitle:
+            "Снизьте расходы на LLM API на 60% и закройте утечки секретов на периметре.",
+          heroLead:
+            "Aegis AI Gateway ставится перед OpenAI, Anthropic, GigaChat, YandexGPT или локальным vLLM/Ollama одним бинарником на 12 МБ: субмиллисекундный L1/L2 семантический кэш, маскировка секретов и ПДн (152-ФЗ), защита от prompt-injection, лимиты RPM и автовыдача лицензий.",
+          f1Title: "DLP и WAF от Prompt-Injection",
+          f1Desc:
+            "Вырезает API-ключи, JWT, телефоны и ПДн до отправки во внешний LLM. Блокирует jailbreak и утечку системного промпта.",
+          f2Title: "L1/L2 семантический кэш + RPM",
+          f2Desc:
+            "Мгновенный точный (SHA-256) и семантический (SimHash) кэш, лимит запросов на ключ (HTTP 429) и контроль дневного бюджета.",
+          f3Title: "Автобиллинг (ЮKassa / CryptoBot / Stripe)",
+          f3Desc:
+            "Готовые вебхуки /webhooks/yookassa, /webhooks/cryptobot и /webhooks/stripe автоматически выпускают подписанные оффлайн-ключи.",
+          calcTitle: "Калькулятор экономии бюджета на LLM",
+          calcSpendLbl: "Месячный расход на LLM API",
+          calcHitLbl: "Доля повторных / похожих запросов (Cache Hit)",
+          calcOutLbl: "Ожидаемая экономия за год",
+          calcPerYr: "/ год",
+          p1Price: "0 ₽",
+          p1Sub: "Apache-2.0 / MIT · Self-hosted",
+          p2Price: "4 900 ₽ / мес",
+          p2Sub: "ЮKassa (СБП / карты РФ) · CryptoBot (USDT/TON)",
+          p3Price: "29 900 ₽ / мес",
+          p3Sub: "Безнал по договору · 152-ФЗ · On-Premise",
+          p2Cta: "Купить Pro-лицензию",
+          p3Cta: "Запросить Enterprise",
+          payTitle:
+            "Готовые платёжные вебхуки для продажи лицензий (РФ и Global)",
+          currency: "rub",
+        },
+      };
+
+      let mode = (navigator.language || "").toLowerCase().startsWith("ru")
+        ? "ru"
+        : "en";
+      const s = document.getElementById("spend"),
+        h = document.getElementById("hit");
+      const sv = document.getElementById("spendVal"),
+        hv = document.getElementById("hitVal"),
+        av = document.getElementById("annualVal");
+
+      function calc() {
+        const m = Number(s.value),
+          r = Number(h.value) / 100;
+        const isRu = i18n[mode].currency === "rub";
+        const mult = isRu ? 100 : 1;
+        const fmt = (v) =>
+          isRu
+            ? Math.round(v * mult).toLocaleString("ru-RU") + " ₽"
+            : "$" + Math.round(v).toLocaleString("en-US");
+        sv.textContent = fmt(m);
+        hv.textContent = Math.round(r * 100) + "%";
+        av.textContent = fmt(m * r * 12);
+      }
+
+      function applyLang(next) {
+        mode = next;
+        const t = i18n[mode];
+        for (const [k, v] of Object.entries(t)) {
+          if (k === "currency") continue;
+          const el = document.getElementById(k);
+          if (el) el.textContent = v;
+        }
+        document
+          .getElementById("btnEn")
+          .classList.toggle("active", mode === "en");
+        document
+          .getElementById("btnRu")
+          .classList.toggle("active", mode === "ru");
+        calc();
+      }
+
+      document
+        .getElementById("btnEn")
+        .addEventListener("click", () => applyLang("en"));
+      document
+        .getElementById("btnRu")
+        .addEventListener("click", () => applyLang("ru"));
+      s.addEventListener("input", calc);
+      h.addEventListener("input", calc);
+      applyLang(mode);
+    </script>
+  </body>
 </html>

@@ -207,6 +207,75 @@ async fn billing_webhook_admin_ui_and_rate_limiter_work() {
     let key = issued["license_key"].as_str().unwrap();
     assert_eq!(verify_license(Some(key), "lic-sec"), LicenseTier::Pro);
 
+    // 2b. Provider webhook adapters: YooKassa (RU), Stripe (Global), CryptoBot (TON/USDT)
+    let yk: Value = client
+        .post(format!("http://{addr}/webhooks/yookassa"))
+        .header("x-aegis-webhook-secret", "hook-sec")
+        .json(&json!({
+            "event": "payment.succeeded",
+            "object": {
+                "status": "succeeded",
+                "metadata": {"tier": "pro", "days": 30, "email": "cto@ru-corp.ru"}
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(yk["provider"], "yookassa");
+    assert_eq!(
+        verify_license(yk["license_key"].as_str(), "lic-sec"),
+        LicenseTier::Pro
+    );
+
+    let st: Value = client
+        .post(format!("http://{addr}/webhooks/stripe"))
+        .header("x-aegis-webhook-secret", "hook-sec")
+        .json(&json!({
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "customer_details": {"email": "eng@us-startup.io"},
+                    "metadata": {"tier": "enterprise", "days": 365}
+                }
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(st["provider"], "stripe");
+    assert_eq!(
+        verify_license(st["license_key"].as_str(), "lic-sec"),
+        LicenseTier::Enterprise
+    );
+
+    let cb: Value = client
+        .post(format!("http://{addr}/webhooks/cryptobot"))
+        .header("x-aegis-webhook-secret", "hook-sec")
+        .json(&json!({
+            "update_type": "invoice_paid",
+            "payload": {
+                "status": "paid",
+                "payload": "pro:90:anon@ton.org"
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cb["provider"], "cryptobot");
+    assert_eq!(
+        verify_license(cb["license_key"].as_str(), "lic-sec"),
+        LicenseTier::Pro
+    );
+
     // 3. Per-key RPM rate limiter trips on 3rd request
     let url = format!("http://{addr}/v1/chat/completions");
     for expected in [502, 502, 429] {
