@@ -14,6 +14,8 @@ pub struct AegisMetrics {
     pub secrets_redacted_total: AtomicU64,
     pub injections_blocked_total: AtomicU64,
     pub budget_rejected_total: AtomicU64,
+    pub rate_limited_total: AtomicU64,
+    pub licenses_issued_total: AtomicU64,
     pub bytes_used: AtomicU64,
     pub entries_count: AtomicU64,
     pub started_at: Instant,
@@ -32,6 +34,8 @@ impl Default for AegisMetrics {
             secrets_redacted_total: AtomicU64::new(0),
             injections_blocked_total: AtomicU64::new(0),
             budget_rejected_total: AtomicU64::new(0),
+            rate_limited_total: AtomicU64::new(0),
+            licenses_issued_total: AtomicU64::new(0),
             bytes_used: AtomicU64::new(0),
             entries_count: AtomicU64::new(0),
             started_at: Instant::now(),
@@ -93,7 +97,13 @@ impl AegisMetrics {
              aegis_injections_blocked_total {}\n\
              # HELP aegis_budget_rejected_total Requests rejected due to daily USD budget cap.\n\
              # TYPE aegis_budget_rejected_total counter\n\
-             aegis_budget_rejected_total {}\n",
+             aegis_budget_rejected_total {}\n\
+             # HELP aegis_rate_limited_total Requests rejected by per-key RPM rate limiter.\n\
+             # TYPE aegis_rate_limited_total counter\n\
+             aegis_rate_limited_total {}\n\
+             # HELP aegis_licenses_issued_total Signed license keys provisioned via billing webhook.\n\
+             # TYPE aegis_licenses_issued_total counter\n\
+             aegis_licenses_issued_total {}\n",
             self.requests_total.load(Ordering::Relaxed),
             self.l1_hits_total.load(Ordering::Relaxed),
             self.l2_hits_total.load(Ordering::Relaxed),
@@ -104,6 +114,8 @@ impl AegisMetrics {
             self.secrets_redacted_total.load(Ordering::Relaxed),
             self.injections_blocked_total.load(Ordering::Relaxed),
             self.budget_rejected_total.load(Ordering::Relaxed),
+            self.rate_limited_total.load(Ordering::Relaxed),
+            self.licenses_issued_total.load(Ordering::Relaxed),
         )
     }
 }

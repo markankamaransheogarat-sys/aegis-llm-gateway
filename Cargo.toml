@@ -1,6 +1,6 @@
 [package]
 name = "aegis-llm-gateway"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
 description = "Commercial-grade AI Cost & Security Gateway in Rust: L1/L2 semantic cache, secret redaction, prompt-injection WAF, USD budgets & offline Pro licensing"

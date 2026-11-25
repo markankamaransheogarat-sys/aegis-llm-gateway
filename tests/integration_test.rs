@@ -153,3 +153,70 @@ async fn gateway_scrubs_secrets_blocks_injection_caches_and_enforces_budget() {
     assert_eq!(stats["l1_hits"], 1);
     assert_eq!(stats["budget_rejected"], 1);
 }
+
+#[tokio::test]
+async fn billing_webhook_admin_ui_and_rate_limiter_work() {
+    let cfg = ServeArgs {
+        upstream: "http://127.0.0.1:9".into(),
+        max_rpm: 2,
+        license_secret: "lic-sec".into(),
+        webhook_secret: "hook-sec".into(),
+        ..Default::default()
+    };
+    let app = build_router(&cfg).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let client = reqwest::Client::new();
+
+    // 1. /admin dashboard serves HTML
+    let admin_html = client
+        .get(format!("http://{addr}/admin"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(admin_html.status(), 200);
+    assert!(admin_html
+        .text()
+        .await
+        .unwrap()
+        .contains("Aegis AI Gateway"));
+
+    // 2. Billing webhook rejects missing secret (401) and issues valid Pro key (200)
+    let unauth = client
+        .post(format!("http://{addr}/webhooks/billing"))
+        .json(&json!({"tier": "pro", "days": 30}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unauth.status(), 401);
+
+    let issued: Value = client
+        .post(format!("http://{addr}/webhooks/billing"))
+        .header("x-aegis-webhook-secret", "hook-sec")
+        .json(&json!({"tier": "pro", "days": 30, "customer_email": "cto@acme.io"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let key = issued["license_key"].as_str().unwrap();
+    assert_eq!(verify_license(Some(key), "lic-sec"), LicenseTier::Pro);
+
+    // 3. Per-key RPM rate limiter trips on 3rd request
+    let url = format!("http://{addr}/v1/chat/completions");
+    for expected in [502, 502, 429] {
+        let resp = client
+            .post(&url)
+            .header("authorization", "Bearer rate-test-key")
+            .json(&json!({"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), expected);
+    }
+}

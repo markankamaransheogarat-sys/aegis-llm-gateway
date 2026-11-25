@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use crate::cache::{canonicalize_request, CacheEngine, CacheHit};
 use crate::config::ServeArgs;
 use crate::error::Result;
-use crate::license::{verify_license, LicenseTier};
+use crate::license::{issue_license, verify_license, LicenseTier};
 use crate::metrics::AegisMetrics;
 use crate::security::{estimate_cost_micros, SecurityFirewall};
 
@@ -29,6 +29,8 @@ pub struct AppState {
     pub upstream: String,
     pub client: reqwest::Client,
     pub tier: LicenseTier,
+    pub license_secret: String,
+    pub webhook_secret: String,
 }
 
 pub fn build_router(cfg: &ServeArgs) -> Result<Router> {
@@ -45,6 +47,7 @@ pub fn build_router(cfg: &ServeArgs) -> Result<Router> {
         cfg.redact_secrets,
         cfg.block_injection,
         cfg.max_daily_usd,
+        cfg.max_rpm,
     )?);
 
     let state = AppState {
@@ -54,12 +57,16 @@ pub fn build_router(cfg: &ServeArgs) -> Result<Router> {
         upstream,
         client: reqwest::Client::new(),
         tier,
+        license_secret: cfg.license_secret.clone(),
+        webhook_secret: cfg.webhook_secret.clone(),
     };
 
     Ok(Router::new()
         .route("/healthz", get(handle_healthz))
         .route("/metrics", get(handle_metrics))
+        .route("/admin", get(handle_admin_ui))
         .route("/admin/stats", get(handle_admin_stats))
+        .route("/webhooks/billing", post(handle_billing_webhook))
         .route("/v1/chat/completions", post(handle_llm_post))
         .route("/v1/completions", post(handle_llm_post))
         .route("/v1/messages", post(handle_llm_post))
@@ -110,6 +117,97 @@ async fn handle_metrics(State(state): State<AppState>) -> Response {
         .into_response()
 }
 
+async fn handle_admin_ui() -> Response {
+    let html = r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aegis AI Gateway — Live Admin</title>
+<style>
+body{margin:0;font-family:Inter,system-ui,sans-serif;background:#0b0f19;color:#e6edf7;padding:32px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px;max-width:1040px}
+.card{background:#121826;border:1px solid #222b40;border-radius:12px;padding:18px}
+.val{font-size:26px;font-weight:800;color:#38bdf8;margin-top:6px}
+.ok{color:#22c55e} .warn{color:#f59e0b}
+</style></head><body>
+<h1>Aegis AI Gateway — Live Control Plane</h1>
+<p>Auto-refreshing every 2s from <code>/admin/stats</code></p>
+<div class="grid" id="grid">Loading...</div>
+<script>
+async function refresh(){
+  const d = await (await fetch('/admin/stats')).json();
+  document.getElementById('grid').innerHTML = [
+    ['License Tier', d.tier.toUpperCase(), 'ok'],
+    ['Requests', d.requests_total, ''],
+    ['Cache Hit Rate', (d.hit_rate*100).toFixed(1)+'%', 'ok'],
+    ['USD Saved', '$'+d.usd_saved.toFixed(4), 'ok'],
+    ['USD Spent', '$'+d.usd_spent.toFixed(4), ''],
+    ['Secrets Redacted', d.secrets_redacted, 'warn'],
+    ['Injections Blocked', d.injections_blocked, 'warn'],
+    ['Budget / RPM 429s', d.budget_rejected + ' / ' + d.rate_limited, 'warn']
+  ].map(([k,v,c])=>`<div class="card"><div>${k}</div><div class="val ${c}">${v}</div></div>`).join('');
+}
+refresh(); setInterval(refresh, 2000);
+</script></body></html>"#;
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct BillingWebhookPayload {
+    #[serde(default = "default_pro")]
+    tier: String,
+    #[serde(default = "default_days")]
+    days: u64,
+    customer_email: Option<String>,
+}
+
+fn default_pro() -> String {
+    "pro".to_string()
+}
+fn default_days() -> u64 {
+    365
+}
+
+async fn handle_billing_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(payload): axum::Json<BillingWebhookPayload>,
+) -> Response {
+    let provided = headers
+        .get("x-aegis-webhook-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if provided != state.webhook_secret {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::CONTENT_TYPE, "application/json")],
+            json!({"error": "invalid webhook secret"}).to_string(),
+        )
+            .into_response();
+    }
+    let key = issue_license(&payload.tier, payload.days, &state.license_secret);
+    state
+        .metrics
+        .licenses_issued_total
+        .fetch_add(1, Ordering::Relaxed);
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        json!({
+            "status": "issued",
+            "tier": payload.tier,
+            "days": payload.days,
+            "customer_email": payload.customer_email,
+            "license_key": key,
+        })
+        .to_string(),
+    )
+        .into_response()
+}
+
 async fn handle_admin_stats(State(state): State<AppState>) -> Response {
     let body = json!({
         "tier": state.tier.as_str(),
@@ -124,6 +222,8 @@ async fn handle_admin_stats(State(state): State<AppState>) -> Response {
         "secrets_redacted": state.metrics.secrets_redacted_total.load(Ordering::Relaxed),
         "injections_blocked": state.metrics.injections_blocked_total.load(Ordering::Relaxed),
         "budget_rejected": state.metrics.budget_rejected_total.load(Ordering::Relaxed),
+        "rate_limited": state.metrics.rate_limited_total.load(Ordering::Relaxed),
+        "licenses_issued": state.metrics.licenses_issued_total.load(Ordering::Relaxed),
         "entries": state.metrics.entries_count.load(Ordering::Relaxed),
         "bytes_used": state.metrics.bytes_used.load(Ordering::Relaxed),
     });
@@ -155,6 +255,25 @@ async fn handle_llm_post(State(state): State<AppState>, req: Request) -> Respons
     let api_key = extract_api_key(&req_headers);
 
     state.metrics.requests_total.fetch_add(1, Ordering::Relaxed);
+
+    if !state.firewall.check_rate_limit(&api_key) {
+        state
+            .metrics
+            .rate_limited_total
+            .fetch_add(1, Ordering::Relaxed);
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("application/json")),
+                (header::RETRY_AFTER, HeaderValue::from_static("60")),
+            ]
+            .into_iter()
+            .collect::<HeaderMap>(),
+            json!({"error": {"code": "rate_limit_exceeded", "message": "Per-key RPM limit exceeded"}})
+                .to_string(),
+        )
+            .into_response();
+    }
 
     if !state.firewall.check_budget(&api_key) {
         state

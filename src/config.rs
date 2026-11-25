@@ -83,6 +83,18 @@ pub struct ServeArgs {
         default_value = "aegis-dev-signing-secret"
     )]
     pub license_secret: String,
+
+    /// Maximum requests per minute per virtual API key (0 = unlimited)
+    #[arg(long, env = "AEGIS_MAX_RPM", default_value_t = 120)]
+    pub max_rpm: u32,
+
+    /// Shared secret required in `X-Aegis-Webhook-Secret` for POST /webhooks/billing
+    #[arg(
+        long,
+        env = "AEGIS_WEBHOOK_SECRET",
+        default_value = "aegis-dev-webhook-secret"
+    )]
+    pub webhook_secret: String,
 }
 
 impl Default for ServeArgs {
@@ -98,6 +110,8 @@ impl Default for ServeArgs {
             block_injection: true,
             license_key: None,
             license_secret: "aegis-dev-signing-secret".to_string(),
+            max_rpm: 120,
+            webhook_secret: "aegis-dev-webhook-secret".to_string(),
         }
     }
 }

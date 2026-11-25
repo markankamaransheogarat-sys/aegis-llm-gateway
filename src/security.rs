@@ -31,6 +31,12 @@ pub fn estimate_cost_micros(model: &str, prompt_tokens: u64, completion_tokens: 
 }
 
 #[derive(Debug, Clone)]
+struct RateBucket {
+    minute_index: u64,
+    count: u32,
+}
+
+#[derive(Debug, Clone)]
 struct BudgetBucket {
     day_index: u64,
     spent_micros: u64,
@@ -41,13 +47,20 @@ pub struct SecurityFirewall {
     secret_rules: Vec<(&'static str, Regex)>,
     injection_rules: Vec<(&'static str, Regex)>,
     budgets: DashMap<String, BudgetBucket>,
+    rates: DashMap<String, RateBucket>,
     max_daily_micros: u64,
+    max_rpm: u32,
     pub redact_secrets: bool,
     pub block_injection: bool,
 }
 
 impl SecurityFirewall {
-    pub fn new(redact_secrets: bool, block_injection: bool, max_daily_usd: f64) -> Result<Self> {
+    pub fn new(
+        redact_secrets: bool,
+        block_injection: bool,
+        max_daily_usd: f64,
+        max_rpm: u32,
+    ) -> Result<Self> {
         let secret_rules = vec![
             ("openai_key", Regex::new(r"sk-[A-Za-z0-9_-]{20,}")?),
             ("aws_key", Regex::new(r"AKIA[0-9A-Z]{16}")?),
@@ -94,7 +107,9 @@ impl SecurityFirewall {
             secret_rules,
             injection_rules,
             budgets: DashMap::new(),
+            rates: DashMap::new(),
             max_daily_micros,
+            max_rpm,
             redact_secrets,
             block_injection,
         })
@@ -106,6 +121,34 @@ impl SecurityFirewall {
             .unwrap_or(Duration::ZERO)
             .as_secs()
             / 86_400
+    }
+
+    /// Check and increment per-minute request quota for `api_key`.
+    pub fn check_rate_limit(&self, api_key: &str) -> bool {
+        if self.max_rpm == 0 {
+            return true;
+        }
+        let minute = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs()
+            / 60;
+        let mut entry = self
+            .rates
+            .entry(api_key.to_string())
+            .or_insert_with(|| RateBucket {
+                minute_index: minute,
+                count: 0,
+            });
+        if entry.minute_index != minute {
+            entry.minute_index = minute;
+            entry.count = 0;
+        }
+        if entry.count >= self.max_rpm {
+            return false;
+        }
+        entry.count += 1;
+        true
     }
 
     /// Check whether `api_key` still has remaining daily USD budget.
