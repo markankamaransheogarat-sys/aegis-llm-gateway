@@ -1,0 +1,14 @@
+services:
+  aegis-gateway:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      AEGIS_BIND: "0.0.0.0:8080"
+      AEGIS_UPSTREAM: "${AEGIS_UPSTREAM:-https://api.openai.com}"
+      AEGIS_MAX_MEMORY_MB: "${AEGIS_MAX_MEMORY_MB:-256}"
+      AEGIS_MAX_DAILY_USD: "${AEGIS_MAX_DAILY_USD:-25.0}"
+      AEGIS_REDACT_SECRETS: "true"
+      AEGIS_BLOCK_INJECTION: "true"
+      AEGIS_LICENSE_KEY: "${AEGIS_LICENSE_KEY:-}"
+    restart: unless-stopped
